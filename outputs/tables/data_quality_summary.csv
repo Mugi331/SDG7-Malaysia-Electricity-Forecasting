@@ -4,4 +4,6 @@
 "Duplicate monthly observations",0
 "Missing expected months",0
 "Unexpected months",0
+"Dates aligned to first day of month",1
+"Expected observations",78
 "Final observations retained",78

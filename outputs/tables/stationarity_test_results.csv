@@ -1,0 +1,6 @@
+"Series","Test","Null_Hypothesis","Statistic","P_Value"
+"Training series","ADF","Unit root / non-stationary",-2.78911633898359,0.254922377694283
+"Training series","KPSS-Level","Level-stationary",0.648113414140734,0.0182624168962969
+"Training series","KPSS-Trend","Trend-stationary",0.113239386923442,0.1
+"First-differenced training series","ADF","Unit root / non-stationary",-6.8478497093952,0.01
+"First-differenced training series","KPSS-Level","Level-stationary",0.0326179989584812,0.1
