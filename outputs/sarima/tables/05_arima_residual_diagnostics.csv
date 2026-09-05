@@ -1,2 +1,0 @@
-"Model","Ljung_Box_Lag","Statistic","DF","P_Value","Residual_ACF_Lag12"
-"ARIMA(0,1,1)",12,26.5968725468742,11,0.00528469611542504,0.245469271524326
