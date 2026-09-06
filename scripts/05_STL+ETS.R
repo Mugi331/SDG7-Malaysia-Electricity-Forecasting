@@ -212,7 +212,7 @@ cat("============================================================\n")
 print(stl_decomposition)
 
 png(
-  "outputs/stl_ets/figures/02_training_stl_decomposition.png",
+  file.path(figure_dir, "02_training_stl_decomposition.png"),
   width = 1800,
   height = 1400,
   res = 180
@@ -330,29 +330,29 @@ cat("Minimum training size :", minimum_training_length, "months\n")
 cat("Number of origins     :", length(origins), "\n")
 
 for (i in seq_len(nrow(candidate_specs))) {
-  
+
   candidate_name <- candidate_specs$Candidate[i]
   ets_model_i <- candidate_specs$ETSModel[i]
   damped_i <- candidate_specs$Damped[i]
-  
+
   all_errors <- numeric(0)
   all_apes <- numeric(0)
   successful_origins <- 0
-  
+
   cat("\nEvaluating", candidate_name, "...\n")
-  
+
   for (origin in origins) {
-    
+
     origin_series <- ts(
       as.numeric(train_ts[1:origin]),
       start = start(train_ts),
       frequency = frequency(train_ts)
     )
-    
+
     actual_values <- as.numeric(
       train_ts[(origin + 1):(origin + cv_horizon)]
     )
-    
+
     fit_try <- try(
       fit_stl_ets_candidate(
         origin_series,
@@ -361,39 +361,39 @@ for (i in seq_len(nrow(candidate_specs))) {
       ),
       silent = TRUE
     )
-    
+
     if (inherits(fit_try, "try-error")) {
       next
     }
-    
+
     forecast_try <- try(
       forecast(fit_try, h = cv_horizon),
       silent = TRUE
     )
-    
+
     if (inherits(forecast_try, "try-error")) {
       next
     }
-    
+
     forecast_values <- as.numeric(forecast_try$mean)
     errors <- actual_values - forecast_values
-    
+
     all_errors <- c(all_errors, errors)
     all_apes <- c(
       all_apes,
       abs(errors / actual_values) * 100
     )
-    
+
     successful_origins <- successful_origins + 1
   }
-  
+
   if (successful_origins == 0) {
     stop(
       "Candidate ", candidate_name,
       " failed at every rolling-origin evaluation."
     )
   }
-  
+
   candidate_row <- data.frame(
     Candidate = candidate_name,
     Successful_Origins = successful_origins,
@@ -403,7 +403,7 @@ for (i in seq_len(nrow(candidate_specs))) {
     CV_ME = mean(all_errors),
     stringsAsFactors = FALSE
   )
-  
+
   cv_results <- rbind(cv_results, candidate_row)
 }
 
@@ -427,7 +427,7 @@ print(cv_results, digits = 5, row.names = FALSE)
 
 write.csv(
   cv_results,
-  "outputs/stl_ets/tables/01_cv_model_selection.csv",
+  file.path(table_dir, "01_cv_model_selection.csv"),
   row.names = FALSE
 )
 
@@ -580,39 +580,376 @@ cat("95% interval empirical coverage:", round(coverage_95, 1), "%\n")
 
 write.csv(
   comparison_table,
-  "outputs/stl_ets/tables/02_test_forecast.csv",
+  file.path(table_dir, "02_test_forecast.csv"),
   row.names = FALSE
 )
 
 
 # ============================================================
-# STEP 20 - TEST FORECAST PLOT
+# STEP 20 - REPORT-READY TEST FORECAST PLOT
 # ============================================================
+# Recreates the polished report figure from the individual
+# submission script: recent training history (Jan 2022-Jun 2023)
+# is shown for visual context, followed by the untouched test
+# period (Jul 2023-Jun 2024) with 80%/95% prediction bands,
+# the STL-ETS forecast, and the actual test values overlaid.
+# Saved directly into the repository's outputs/stl_ets/figures
+# folder rather than the working directory.
+
+cat("\n============================================================\n")
+cat("CREATING TEST FORECAST VS ACTUAL PLOT\n")
+cat("============================================================\n")
+
+
+# ------------------------------------------------------------
+# 20.1 RECENT TRAINING HISTORY
+# ------------------------------------------------------------
+# Show Jan 2022-Jun 2023 for visual context before the
+# untouched test period Jul 2023-Jun 2024.
+
+recent_train <- window(
+  train_ts,
+  start = c(2022, 1),
+  end = c(2023, 6)
+)
+
+recent_train_dates <- seq(
+  from = as.Date("2022-01-01"),
+  to   = as.Date("2023-06-01"),
+  by   = "month"
+)
+
+forecast_dates <- test_dates
+
+
+# ------------------------------------------------------------
+# 20.2 EXTRACT VALUES
+# ------------------------------------------------------------
+
+recent_train_values <- as.numeric(recent_train)
+actual_values <- as.numeric(test_ts)
+forecast_values <- as.numeric(test_forecast$mean)
+
+lower_80 <- as.numeric(test_forecast$lower[, "80%"])
+upper_80 <- as.numeric(test_forecast$upper[, "80%"])
+
+lower_95 <- as.numeric(test_forecast$lower[, "95%"])
+upper_95 <- as.numeric(test_forecast$upper[, "95%"])
+
+
+# ------------------------------------------------------------
+# 20.3 SAFETY CHECKS
+# ------------------------------------------------------------
+
+if (length(recent_train_dates) != length(recent_train_values)) {
+  stop("Recent training dates and values have different lengths.")
+}
+
+if (length(forecast_dates) != length(forecast_values)) {
+  stop("Forecast dates and forecast values have different lengths.")
+}
+
+if (length(actual_values) != length(forecast_values)) {
+  stop("Actual and forecast test values have different lengths.")
+}
+
+if (
+  any(!is.finite(recent_train_values)) ||
+  any(!is.finite(actual_values)) ||
+  any(!is.finite(forecast_values)) ||
+  any(!is.finite(lower_80)) ||
+  any(!is.finite(upper_80)) ||
+  any(!is.finite(lower_95)) ||
+  any(!is.finite(upper_95))
+) {
+  stop("Non-finite values detected in plotting data.")
+}
+
+
+# ------------------------------------------------------------
+# 20.4 OUTPUT LOCATION (repository figures folder)
+# ------------------------------------------------------------
+
+plot_file <- file.path(
+  figure_dir,
+  "03_test_forecast_vs_actual.png"
+)
+
+cat("Figure will be saved to:\n")
+cat(normalizePath(figure_dir, winslash = "/", mustWork = FALSE), "\n")
+
+
+# ------------------------------------------------------------
+# 20.5 Y-AXIS RANGE
+# ------------------------------------------------------------
+
+y_range <- range(
+  recent_train_values,
+  actual_values,
+  forecast_values,
+  lower_95,
+  upper_95,
+  na.rm = TRUE
+)
+
+y_padding <- diff(y_range) * 0.06
+
+if (!is.finite(y_padding) || y_padding == 0) {
+  y_padding <- 100
+}
+
+y_limits <- c(
+  y_range[1] - y_padding,
+  y_range[2] + y_padding
+)
+
+
+# ------------------------------------------------------------
+# 20.6 OPEN PNG DEVICE
+# ------------------------------------------------------------
+
 png(
-  "outputs/stl_ets/figures/03_test_forecast_vs_actual.png",
+  filename = plot_file,
   width = 1800,
-  height = 1100,
-  res = 180
+  height = 1000,
+  res = 200
 )
+
+
+# ------------------------------------------------------------
+# 20.7 PLOT SETUP
+# ------------------------------------------------------------
+
+par(
+  mar = c(5.2, 5.4, 4.8, 1.5),
+  mgp = c(3.1, 0.8, 0)
+)
+
 plot(
-  test_forecast,
-  main = "STL-ETS Test Forecast vs Actual Consumption",
-  xlab = "Year",
+  recent_train_dates,
+  recent_train_values,
+  type = "n",
+  xlim = c(
+    as.Date("2022-01-01"),
+    as.Date("2024-06-01")
+  ),
+  ylim = y_limits,
+  xaxt = "n",
+  xlab = "Month",
   ylab = "Electricity Consumption",
-  lwd = 2,
-  xlim = c(2022, 2024.6)
+  main = "STL-ETS Test Forecast vs Actual Consumption",
+  cex.main = 1.20,
+  cex.lab = 1.00,
+  cex.axis = 0.92,
+  las = 1
 )
-lines(test_ts, col = "red", lwd = 2)
+
+grid(
+  nx = NA,
+  ny = NULL,
+  lty = "dotted",
+  col = "grey85"
+)
+
+
+# ------------------------------------------------------------
+# 20.8 95% PREDICTION INTERVAL
+# ------------------------------------------------------------
+
+polygon(
+  x = c(
+    forecast_dates,
+    rev(forecast_dates)
+  ),
+  y = c(
+    lower_95,
+    rev(upper_95)
+  ),
+  col = adjustcolor(
+    "grey70",
+    alpha.f = 0.50
+  ),
+  border = NA
+)
+
+
+# ------------------------------------------------------------
+# 20.9 80% PREDICTION INTERVAL
+# ------------------------------------------------------------
+
+polygon(
+  x = c(
+    forecast_dates,
+    rev(forecast_dates)
+  ),
+  y = c(
+    lower_80,
+    rev(upper_80)
+  ),
+  col = adjustcolor(
+    "lightblue",
+    alpha.f = 0.60
+  ),
+  border = NA
+)
+
+
+# ------------------------------------------------------------
+# 20.10 OBSERVED HISTORY
+# ------------------------------------------------------------
+
+lines(
+  recent_train_dates,
+  recent_train_values,
+  col = "black",
+  lwd = 2
+)
+
+
+# ------------------------------------------------------------
+# 20.11 STL-ETS FORECAST
+# ------------------------------------------------------------
+
+lines(
+  forecast_dates,
+  forecast_values,
+  col = "blue",
+  lwd = 2.4
+)
+
+
+# ------------------------------------------------------------
+# 20.12 ACTUAL TEST DATA
+# ------------------------------------------------------------
+
+lines(
+  forecast_dates,
+  actual_values,
+  col = "red",
+  lwd = 2.4
+)
+
+
+# ------------------------------------------------------------
+# 20.13 START OF TEST PERIOD
+# ------------------------------------------------------------
+# Light dashed line marks Jul 2023 without drawing too much
+# attention away from the forecasts.
+
+abline(
+  v = as.Date("2023-07-01"),
+  lty = 2,
+  lwd = 0.9,
+  col = "grey60"
+)
+
+
+# ------------------------------------------------------------
+# 20.14 HUMAN-READABLE X-AXIS
+# ------------------------------------------------------------
+
+axis_dates <- as.Date(c(
+  "2022-01-01",
+  "2022-07-01",
+  "2023-01-01",
+  "2023-07-01",
+  "2024-01-01",
+  "2024-06-01"
+))
+
+axis_labels <- c(
+  "Jan\n2022",
+  "Jul\n2022",
+  "Jan\n2023",
+  "Jul\n2023",
+  "Jan\n2024",
+  "Jun\n2024"
+)
+
+axis(
+  side = 1,
+  at = axis_dates,
+  labels = axis_labels,
+  cex.axis = 0.88
+)
+
+
+# ------------------------------------------------------------
+# 20.15 COMPACT LEGEND
+# ------------------------------------------------------------
+
 legend(
   "topleft",
-  legend = c("STL-ETS forecast", "Actual"),
-  col = c("blue", "red"),
-  lty = 1,
-  lwd = 2,
-  bty = "n"
+  legend = c(
+    "Observed history",
+    "STL-ETS forecast",
+    "Actual test data",
+    "80% prediction interval",
+    "95% prediction interval"
+  ),
+  col = c(
+    "black",
+    "blue",
+    "red",
+    adjustcolor("lightblue", alpha.f = 0.85),
+    adjustcolor("grey70", alpha.f = 0.85)
+  ),
+  lty = c(
+    1,
+    1,
+    1,
+    NA,
+    NA
+  ),
+  lwd = c(
+    2,
+    2.4,
+    2.4,
+    NA,
+    NA
+  ),
+  pch = c(
+    NA,
+    NA,
+    NA,
+    15,
+    15
+  ),
+  pt.cex = c(
+    NA,
+    NA,
+    NA,
+    1.7,
+    1.7
+  ),
+  bty = "n",
+  cex = 0.74
 )
-grid()
+
+
+# ------------------------------------------------------------
+# 20.16 CLOSE DEVICE AND CONFIRM OUTPUT
+# ------------------------------------------------------------
+
 dev.off()
+
+if (!file.exists(plot_file)) {
+  stop(
+    "Plotting completed, but the PNG file was not found at: ",
+    plot_file
+  )
+}
+
+cat("\nPlot created successfully.\n")
+cat("Saved as:\n")
+cat(
+  normalizePath(
+    plot_file,
+    winslash = "/",
+    mustWork = FALSE
+  ),
+  "\n"
+)
 
 
 # ============================================================
@@ -626,23 +963,6 @@ cat("RESIDUAL DIAGNOSTICS\n")
 cat("============================================================\n")
 cat("Residual mean:", round(mean(model_residuals), 4), "\n")
 cat("Residual SD  :", round(sd(model_residuals), 4), "\n")
-
-# ============================================================
-# STEP 21 - RESIDUAL DIAGNOSTICS
-# ============================================================
-
-model_residuals <- residuals(stl_ets_model)
-model_residuals <- model_residuals[is.finite(model_residuals)]
-
-cat("\n============================================================\n")
-cat("RESIDUAL DIAGNOSTICS\n")
-cat("============================================================\n")
-
-cat("Residual mean:",
-    round(mean(model_residuals), 4), "\n")
-
-cat("Residual SD:",
-    round(sd(model_residuals), 4), "\n")
 
 
 # ------------------------------------------------------------
@@ -673,16 +993,16 @@ cat(
 )
 
 if (ljung_box$p.value > 0.05) {
-  
+
   cat(
     "Decision: Fail to reject H0.\n",
     "Interpretation: There is insufficient evidence of ",
     "significant residual autocorrelation up to lag 12.\n",
     sep = ""
   )
-  
+
 } else {
-  
+
   cat(
     "Decision: Reject H0.\n",
     "Interpretation: Statistically significant residual ",
@@ -697,7 +1017,7 @@ if (ljung_box$p.value > 0.05) {
 # ------------------------------------------------------------
 
 png(
-  "outputs/stl_ets/figures/04_residual_diagnostics.png",
+  file.path(figure_dir, "04_residual_diagnostics.png"),
   width = 1800,
   height = 1200,
   res = 180
@@ -716,7 +1036,7 @@ dev.off()
 # ------------------------------------------------------------
 
 png(
-  "outputs/stl_ets/figures/05_residual_acf.png",
+  file.path(figure_dir, "05_residual_acf.png"),
   width = 1500,
   height = 1000,
   res = 180
@@ -728,49 +1048,6 @@ Acf(
   main = "ACF of STL-ETS Residuals"
 )
 
-dev.off()
-
-cat("\nLjung-Box test at lag 12:\n")
-print(ljung_box)
-cat("Ljung-Box p-value:", round(ljung_box$p.value, 4), "\n")
-
-if (ljung_box$p.value > 0.05) {
-  cat(
-    "Interpretation: p > 0.05; there is insufficient evidence ",
-    "of residual autocorrelation up to lag 12.\n",
-    sep = ""
-  )
-} else {
-  cat(
-    "Interpretation: p <= 0.05; statistically significant ",
-    "residual autocorrelation remains. This should be reported ",
-    "as a model limitation rather than hidden or tuned away.\n",
-    sep = ""
-  )
-}
-
-# Full graphical diagnostics
-png(
-  "outputs/stl_ets/figures/04_residual_diagnostics.png",
-  width = 1800,
-  height = 1200,
-  res = 180
-)
-checkresiduals(stl_ets_model, lag = 12)
-dev.off()
-
-# Separate ACF for easy inclusion in reports/slides
-png(
-  "outputs/stl_ets/figures/05_residual_acf.png",
-  width = 1500,
-  height = 1000,
-  res = 180
-)
-Acf(
-  model_residuals,
-  lag.max = 24,
-  main = "ACF of STL-ETS Residuals"
-)
 dev.off()
 
 
@@ -838,7 +1115,7 @@ model_summary <- data.frame(
 
 write.csv(
   model_summary,
-  "outputs/stl_ets/tables/03_model_summary.csv",
+  file.path(table_dir, "03_model_summary.csv"),
   row.names = FALSE
 )
 
@@ -913,7 +1190,7 @@ print(future_table, row.names = FALSE)
 
 write.csv(
   future_table,
-  "outputs/stl_ets/tables/04_future_forecast.csv",
+  file.path(table_dir, "04_future_forecast.csv"),
   row.names = FALSE
 )
 
@@ -922,7 +1199,7 @@ write.csv(
 # STEP 26 - FUTURE FORECAST PLOT
 # ============================================================
 png(
-  "outputs/stl_ets/figures/06_future_forecast.png",
+  file.path(figure_dir, "06_future_forecast.png"),
   width = 1800,
   height = 1100,
   res = 180
@@ -944,7 +1221,7 @@ dev.off()
 # This file contains the exact values to paste into the individual
 # report template generated with this script.
 
-sink("outputs/stl_ets/tables/05_report_values.txt")
+sink(file.path(table_dir, "05_report_values.txt"))
 
 cat("STL-ETS REPORT-READY VALUES\n")
 cat("============================================================\n\n")
@@ -995,7 +1272,7 @@ cat("outputs/stl_ets/tables/01_cv_model_selection.csv\n")
 cat("outputs/stl_ets/tables/02_test_forecast.csv\n")
 cat("outputs/stl_ets/tables/04_future_forecast.csv\n")
 cat("outputs/stl_ets/tables/03_model_summary.csv\n")
-cat("STL_ETS_01_original_series.png\n")
+cat("outputs/stl_ets/figures/01_original_series.png\n")
 cat("outputs/stl_ets/figures/02_training_stl_decomposition.png\n")
 cat("outputs/stl_ets/figures/03_test_forecast_vs_actual.png\n")
 cat("outputs/stl_ets/figures/04_residual_diagnostics.png\n")
